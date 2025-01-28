@@ -125,7 +125,7 @@
     <h1>Base Converter</h1>
     <label for="baseFrom">Convert From</label>
     <select id="baseFrom" ng-model="baseFrom" ng-change="updateValidInput()">
-      <option ng-repeat="(key, value) in bases" value="{{key}}">{{value}}</option>
+      <option ng-repeat="(key, value) in bases" value="{{key}}">{{value.value}}</option>
     </select>
 
     <div class="instruction">Enter a valid number in the selected base.</div>
@@ -139,7 +139,7 @@
 
     <label for="baseTo">Convert To</label>
     <select id="baseTo" ng-model="baseTo">
-      <option ng-repeat="(key, value) in bases" value="{{key}}">{{value}}</option>
+      <option ng-repeat="(key, value) in bases" value="{{key}}">{{value.value}}</option>
     </select>
 
     <button ng-click="convert()" ng-disabled="!input || input === ''">Convert</button>
@@ -183,96 +183,152 @@
   var app = angular.module("binaryApp", []);
 
   app.controller("controller", function ($scope) {
-    // ----------------------
+    // ========================
+    //  Custom Conversion Logic
+    // ========================
+    function toDecimal(numberStr, base) {
+      if (!numberStr || base < 2 || base > 36) return NaN;
+      const digits = numberStr.toUpperCase().split('');
+      let decimal = 0;
+
+      for(let char of digits) {
+        const value = char >= 'A' ?
+          char.charCodeAt(0) - 55 :  // A-F -> 10-15
+          char.charCodeAt(0) - 48;   // 0-9
+
+        if(value >= base || value < 0) return NaN;
+
+        decimal = decimal * base + value;
+      }
+      return decimal;
+    }
+
+    function fromDecimal(decimal, base) {
+      if(decimal === 0) return '0';
+      if(base < 2 || base > 36) return '';
+
+      const digits = [];
+      let num = Math.abs(decimal);
+
+      while(num > 0) {
+        const remainder = num % base;
+        digits.push(remainder > 9 ?
+          String.fromCharCode(remainder + 55) :  // A-F
+          String.fromCharCode(remainder + 48));  // 0-9
+        num = Math.floor(num / base);
+      }
+
+      return digits.reverse().join('');
+    }
+
+    // ========================
+    //  Base Converter Logic
+    // ========================
+    const baseMap = {
+      bin: { value: "Binary", base: 2 },
+      oct: { value: "Octal", base: 8 },
+      dec: { value: "Decimal", base: 10 },
+      hex: { value: "Hexadecimal", base: 16 }
+    };
+
+    $scope.bases = baseMap;
+    $scope.baseFrom = "bin";
+    $scope.baseTo = "bin";
+    $scope.input = "";
+    $scope.result = "";
+
+    $scope.validateInput = function() {
+      const baseInfo = baseMap[$scope.baseFrom];
+
+      // Filter invalid characters
+      const regexMap = {
+        bin: /[^01]/g,
+        oct: /[^0-7]/g,
+        dec: /[^0-9]/g,
+        hex: /[^0-9a-f]/gi
+      };
+
+      // Filter maximum length
+      const lenMap = {
+        bin: 8,
+        oct: 3,
+        dec: 3,
+        hex: 2
+      }
+
+      let valid = $scope.input
+        .replace(regexMap[$scope.baseFrom], "")
+        .substring(0, lenMap[$scope.baseFrom]);
+
+      // Clamp to maximum value (255)
+      const decimalValue = toDecimal(valid, baseInfo.base);
+      if(decimalValue > 255) {
+        valid = fromDecimal(255, baseInfo.base).toUpperCase();
+      }
+
+      if($scope.input !== valid) $scope.input = valid;
+    };
+
+    $scope.convert = function() {
+      if(!$scope.input) {
+        $scope.result = "Invalid input";
+        return;
+      }
+
+      const fromBase = baseMap[$scope.baseFrom].base;
+      const toBase = baseMap[$scope.baseTo].base;
+      const decimal = toDecimal($scope.input, fromBase);
+
+      if(isNaN(decimal)) {
+        $scope.result = "Invalid input";
+        return;
+      }
+
+      $scope.result = fromDecimal(decimal, toBase).toUpperCase();
+    };
+
+    // ========================
+    //  Binary Adder Logic
+    // ========================
+    $scope.binary1 = "";
+    $scope.binary2 = "";
+    $scope.adderResult = "";
+    $scope.overflow = false;
+
+    // Binary input validation
+    $scope.validateBinary = function(bin) {
+      return bin.replace(/[^01]/g, "").substring(0, 8);
+    };
+
+    $scope.validateBinary1 = function() {
+      $scope.binary1 = $scope.validateBinary($scope.binary1);
+    };
+
+    $scope.validateBinary2 = function() {
+      $scope.binary2 = $scope.validateBinary($scope.binary2);
+    };
+
+    $scope.addBinaries = function() {
+      const val1 = toDecimal($scope.binary1 || '0', 2);
+      const val2 = toDecimal($scope.binary2 || '0', 2);
+      const sum = val1 + val2;
+
+      // When I do sum & 0xFF (255), I keep only the first 8 bits
+      // This is equivalent to sum % 256 (since 2^8 = 256)
+      // This handles overflow automatically for 8-bit numbers
+      const maskedSum = sum & 0xFF;
+
+      $scope.overflow = sum !== maskedSum;
+      $scope.adderResult = fromDecimal(maskedSum, 2)
+        .padStart(8, '0');  // Show leading zeros
+    };
+
+    // ========================
     //  Tab Management
-    // ----------------------
+    // ========================
     $scope.activeTab = "converter";
     $scope.setTab = function(tab) {
       $scope.activeTab = tab;
-    };
-
-    // ----------------------
-    //  Base Converter Setup
-    // ----------------------
-    const baseTable = { bin: 2, oct: 8, dec: 10, hex: 16 };
-    const reMap     = { bin: /[^01]/g, oct: /[^0-7]/g, dec: /[^0-9]/g, hex: /[^0-9a-fA-F]/g };
-    const lenMap    = { bin: 8,      oct: 3,         dec: 3,          hex: 2 };
-
-    $scope.bases    = { bin: "Binary", oct: "Octal", dec: "Decimal", hex: "Hexadecimal" };
-    $scope.baseFrom = "bin";
-    $scope.baseTo   = "bin";
-    $scope.input    = "";
-    $scope.result   = "";
-
-    // Validate the base-specific input length & allowed chars
-    $scope.validateInput = function () {
-      const base = $scope.baseFrom;
-      let validInput = $scope.input.replace(reMap[base], "").substring(0, lenMap[base]);
-
-      // Clamp value to 255 (Decimal)
-      if (base === "oct" && parseInt(validInput, 8) > 255) validInput = "377";
-      if (base === "dec" && parseInt(validInput, 10) > 255) validInput = "255";
-
-      // Update if changed
-      if ($scope.input !== validInput) {
-        $scope.input = validInput;
-      }
-    };
-
-    // Reset the fields when changing "Convert From"
-    $scope.updateValidInput = function () {
-      $scope.input = "";
-      $scope.result = "";
-    };
-
-    // Convert from one base to another
-    $scope.convert = function () {
-      if ($scope.input) {
-        try {
-          const number = parseInt($scope.input, baseTable[$scope.baseFrom]);
-          $scope.result = number.toString(baseTable[$scope.baseTo]).toUpperCase();
-        } catch (error) {
-          $scope.result = "Invalid input";
-        }
-      } else {
-        $scope.result = "Invalid input";
-      }
-    };
-
-    // ----------------------
-    //  Binary Adder Setup
-    // ----------------------
-    $scope.binary1     = "";
-    $scope.binary2     = "";
-    $scope.adderResult = "";
-    $scope.overflow    = false;
-
-    // Validate each binary input
-    $scope.validateBinary1 = function() {
-      const valid = $scope.binary1.replace(/[^01]/g, "").substring(0, 8);
-      if ($scope.binary1 !== valid) {
-        $scope.binary1 = valid;
-      }
-    };
-    $scope.validateBinary2 = function() {
-      const valid = $scope.binary2.replace(/[^01]/g, "").substring(0, 8);
-      if ($scope.binary2 !== valid) {
-        $scope.binary2 = valid;
-      }
-    };
-
-    // Add two 8-bit binary numbers
-    $scope.addBinaries = function() {
-      const val1 = parseInt($scope.binary1 || "0", 2);
-      const val2 = parseInt($scope.binary2 || "0", 2);
-      const sum = val1 + val2;
-
-      // Check for overflow beyond 8 bits
-      $scope.overflow = (sum > 255);
-
-      // Convert to an 8-bit binary string
-      const maskedSum = sum & 0xFF;
-      $scope.adderResult = maskedSum.toString(2).padStart(8, "0");
     };
   });
 </script>
